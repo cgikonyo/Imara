@@ -43,7 +43,7 @@ MPESA_PASSKEY=
 MPESA_CALLBACK_URL=
 ```
 
-Never commit `.env` or real Daraja credentials.
+
 
 ## Frontend setup
 
