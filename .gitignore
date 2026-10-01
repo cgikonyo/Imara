@@ -1,0 +1,28 @@
+@"
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Laravel
+api/vendor/
+api/node_modules/
+api/storage/*.key
+api/storage/framework/
+api/storage/logs/
+api/bootstrap/cache/*.php
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+"@ | Set-Content .gitignore
