@@ -34,6 +34,6 @@ class User extends Authenticatable
     }
     public function mpesaTransactions(): HasMany
     {
-        return $this->hasMany(MpesaTransactions::class);
+        return $this->hasMany(MpesaTransaction::class);
     }
 }

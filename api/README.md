@@ -1,3 +1,9 @@
+## M-Pesa repayments
+
+Authenticated customers can request an M-Pesa STK Push with `POST /api/repayments/mpesa` using `loan_id`, a whole-KES `amount`, and an optional Kenyan `phone_number`. The loan is updated only after a successful Safaricom callback at `POST /api/mpesa/callback`; failed and cancelled requests do not create repayments. A loan can have only one pending M-Pesa repayment at a time.
+
+Configure `MPESA_ENVIRONMENT`, `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY`, and a publicly reachable HTTPS `MPESA_CALLBACK_URL` in the API environment before enabling Daraja requests.
+
 <p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
 <p align="center">
