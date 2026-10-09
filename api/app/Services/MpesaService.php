@@ -105,4 +105,55 @@ class MpesaService
 
         return $data;
     }
+
+    /**
+     * Retrieve the authoritative status of an STK Push request.
+     *
+     * @return array<string, mixed>
+     */
+    public function stkQuery(string $checkoutRequestId): array
+    {
+        $baseUrl = config('services.mpesa.environment') === 'sandbox'
+            ? 'https://sandbox.safaricom.co.ke'
+            : 'https://api.safaricom.co.ke';
+
+        $shortcode = config('services.mpesa.shortcode');
+        $passkey = config('services.mpesa.passkey');
+
+        if (! $shortcode || ! $passkey) {
+            throw new \RuntimeException(
+                'M-Pesa shortcode or passkey is not configured.'
+            );
+        }
+
+        $timestamp = now()->format('YmdHis');
+        $password = base64_encode($shortcode.$passkey.$timestamp);
+
+        $response = Http::withToken($this->getAccessToken())
+            ->post($baseUrl.'/mpesa/stkpushquery/v1/query', [
+                'BusinessShortCode' => $shortcode,
+                'Password' => $password,
+                'Timestamp' => $timestamp,
+                'CheckoutRequestID' => $checkoutRequestId,
+            ]);
+
+        if ($response->failed()) {
+            throw new \RuntimeException(
+                'STK Query request failed: '.$response->body()
+            );
+        }
+
+        $data = $response->json();
+        if (
+            ! is_array($data)
+            || (string) ($data['ResponseCode'] ?? '') !== '0'
+            || ($data['CheckoutRequestID'] ?? null) !== $checkoutRequestId
+        ) {
+            throw new \RuntimeException(
+                'STK Query response was invalid or did not match the request.'
+            );
+        }
+
+        return $data;
+    }
 }

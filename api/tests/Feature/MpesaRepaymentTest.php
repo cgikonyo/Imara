@@ -116,6 +116,7 @@ class MpesaRepaymentTest extends TestCase
         [$user, $loan] = $this->createLoan();
         $transaction = $this->createPendingTransaction($user, $loan);
         $callback = $this->successCallback();
+        $this->fakeStkQuery('0');
 
         $this->postJson('/api/mpesa/callback', $callback)->assertOk();
         $this->postJson('/api/mpesa/callback', $callback)->assertOk();
@@ -146,6 +147,7 @@ class MpesaRepaymentTest extends TestCase
     {
         [$user, $loan] = $this->createLoan();
         $transaction = $this->createPendingTransaction($user, $loan);
+        $this->fakeStkQuery('1032');
 
         $this->postJson('/api/mpesa/callback', [
             'Body' => [
@@ -161,6 +163,91 @@ class MpesaRepaymentTest extends TestCase
             'id' => $transaction->id,
             'status' => 'cancelled',
         ]);
+        $this->assertDatabaseCount('repayments', 0);
+        $this->assertDatabaseHas('loans', [
+            'id' => $loan->id,
+            'outstanding_balance' => 1000,
+        ]);
+    }
+
+    public function test_unverified_success_callback_does_not_complete_payment(): void
+    {
+        [$user, $loan] = $this->createLoan();
+        $transaction = $this->createPendingTransaction($user, $loan);
+        $this->fakeStkQuery('1037');
+
+        $this->postJson('/api/mpesa/callback', $this->successCallback())->assertOk();
+
+        $this->assertDatabaseHas('mpesa_transactions', [
+            'id' => $transaction->id,
+            'status' => 'failed',
+        ]);
+        $this->assertDatabaseCount('repayments', 0);
+        $this->assertDatabaseHas('loans', [
+            'id' => $loan->id,
+            'outstanding_balance' => 1000,
+        ]);
+    }
+
+    public function test_callback_with_mismatched_amount_does_not_complete_payment(): void
+    {
+        [$user, $loan] = $this->createLoan();
+        $transaction = $this->createPendingTransaction($user, $loan);
+        $callback = $this->successCallback();
+        $callback['Body']['stkCallback']['CallbackMetadata']['Item'][0]['Value'] = 251;
+        $this->fakeStkQuery('0');
+
+        $this->postJson('/api/mpesa/callback', $callback)->assertOk();
+
+        $this->assertDatabaseHas('mpesa_transactions', [
+            'id' => $transaction->id,
+            'status' => 'pending',
+            'mpesa_receipt' => null,
+        ]);
+        $this->assertDatabaseCount('repayments', 0);
+        $this->assertDatabaseHas('loans', [
+            'id' => $loan->id,
+            'outstanding_balance' => 1000,
+        ]);
+    }
+
+    public function test_pending_transaction_can_be_reconciled_by_its_owner(): void
+    {
+        [$user, $loan] = $this->createLoan();
+        $transaction = $this->createPendingTransaction($user, $loan);
+        Sanctum::actingAs($user);
+        $this->fakeStkQuery('0');
+
+        $this->postJson("/api/repayments/mpesa/{$transaction->id}/reconcile")
+            ->assertOk()
+            ->assertJsonPath('data.transaction.status', 'completed');
+
+        $this->assertDatabaseHas('mpesa_transactions', [
+            'id' => $transaction->id,
+            'status' => 'completed',
+            'mpesa_receipt' => null,
+        ]);
+        $this->assertDatabaseHas('repayments', [
+            'loan_id' => $loan->id,
+            'transaction_reference' => $transaction->checkout_request_id,
+        ]);
+        $this->assertDatabaseHas('loans', [
+            'id' => $loan->id,
+            'outstanding_balance' => 750,
+        ]);
+    }
+
+    public function test_reconciliation_does_not_change_pending_status_when_safaricom_is_still_processing(): void
+    {
+        [$user, $loan] = $this->createLoan();
+        $transaction = $this->createPendingTransaction($user, $loan);
+        Sanctum::actingAs($user);
+        $this->fakeStkQuery(null);
+
+        $this->postJson("/api/repayments/mpesa/{$transaction->id}/reconcile")
+            ->assertOk()
+            ->assertJsonPath('data.transaction.status', 'pending');
+
         $this->assertDatabaseCount('repayments', 0);
         $this->assertDatabaseHas('loans', [
             'id' => $loan->id,
@@ -256,5 +343,33 @@ class MpesaRepaymentTest extends TestCase
                 ],
             ],
         ];
+    }
+
+    private function fakeStkQuery(?string $resultCode): void
+    {
+        config([
+            'services.mpesa.environment' => 'sandbox',
+            'services.mpesa.consumer_key' => 'consumer-key',
+            'services.mpesa.consumer_secret' => 'consumer-secret',
+            'services.mpesa.shortcode' => '174379',
+            'services.mpesa.passkey' => 'passkey',
+        ]);
+
+        $queryResponse = [
+            'ResponseCode' => '0',
+            'ResponseDescription' => 'The service request has been accepted successfully',
+            'CheckoutRequestID' => 'checkout_123',
+        ];
+        if ($resultCode !== null) {
+            $queryResponse['ResultCode'] = $resultCode;
+            $queryResponse['ResultDesc'] = 'Query result';
+        }
+
+        Http::fake([
+            '*sandbox.safaricom.co.ke/oauth/v1/generate*' => Http::response([
+                'access_token' => 'test-token',
+            ]),
+            '*sandbox.safaricom.co.ke/mpesa/stkpushquery/v1/query*' => Http::response($queryResponse),
+        ]);
     }
 }

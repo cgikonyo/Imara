@@ -1,6 +1,6 @@
 ## M-Pesa repayments
 
-Authenticated customers can request an M-Pesa STK Push with `POST /api/repayments/mpesa` using `loan_id`, a whole-KES `amount`, and an optional Kenyan `phone_number`. The loan is updated only after a successful Safaricom callback at `POST /api/mpesa/callback`; failed and cancelled requests do not create repayments. A loan can have only one pending M-Pesa repayment at a time.
+Authenticated customers can request an M-Pesa STK Push with `POST /api/repayments/mpesa` using `loan_id`, a whole-KES `amount`, and an optional Kenyan `phone_number`. Successful callbacks are verified with Daraja STK Query before a repayment is recorded. Failed and cancelled requests do not create repayments, and a loan can have only one pending M-Pesa repayment at a time. An owner or admin can check a pending transaction with `POST /api/repayments/mpesa/{transaction}/reconcile`; payments still processing remain pending.
 
 Configure `MPESA_ENVIRONMENT`, `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY`, and a publicly reachable HTTPS `MPESA_CALLBACK_URL` in the API environment before enabling Daraja requests.
 

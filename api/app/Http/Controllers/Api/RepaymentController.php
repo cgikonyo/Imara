@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Loan;
 use App\Models\MpesaTransaction;
+use App\Services\MpesaPaymentProcessor;
 use App\Services\MpesaService;
 use App\Services\RepaymentService;
 use Illuminate\Http\Client\ConnectionException;
@@ -200,5 +201,50 @@ class RepaymentController extends Controller
                 'response_description' => $response['ResponseDescription'] ?? null,
             ],
         ], 202);
+    }
+
+    public function reconcileMpesa(
+        Request $request,
+        MpesaTransaction $transaction,
+        MpesaPaymentProcessor $paymentProcessor
+    ): JsonResponse {
+        if (
+            $transaction->user_id !== $request->user()->id
+            && ! $request->user()->is_admin
+        ) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not authorized to view this payment.',
+            ], 403);
+        }
+
+        if ($transaction->transaction_type !== 'repayment') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only repayment transactions can be reconciled.',
+            ], 422);
+        }
+
+        try {
+            $transaction = $paymentProcessor->reconcile($transaction);
+        } catch (ConnectionException|\RuntimeException $exception) {
+            Log::error('M-Pesa payment reconciliation failed.', [
+                'mpesa_transaction_id' => $transaction->id,
+                'exception' => $exception::class,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Payment status could not be checked. Please try again.',
+            ], 502);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Payment status retrieved.',
+            'data' => [
+                'transaction' => $transaction->fresh(),
+            ],
+        ]);
     }
 }

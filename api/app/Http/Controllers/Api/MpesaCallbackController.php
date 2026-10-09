@@ -3,17 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\MpesaTransaction;
-use App\Services\RepaymentService;
-use Carbon\Carbon;
+use App\Services\MpesaPaymentProcessor;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class MpesaCallbackController extends Controller
 {
-    public function handle(Request $request, RepaymentService $repaymentService): JsonResponse
+    public function handle(Request $request, MpesaPaymentProcessor $paymentProcessor): JsonResponse
     {
         $callback = $request->input('Body.stkCallback');
         $checkoutRequestId = is_array($callback)
@@ -32,84 +30,28 @@ class MpesaCallbackController extends Controller
             ], 400);
         }
 
-        DB::transaction(function () use (
-            $callback,
-            $checkoutRequestId,
-            $resultCode,
-            $repaymentService
-        ) {
-            $transaction = MpesaTransaction::query()
-                ->where('checkout_request_id', $checkoutRequestId)
-                ->lockForUpdate()
-                ->first();
+        if (! is_array($callback)) {
+            Log::warning('Invalid M-Pesa callback received.');
 
-            if (! $transaction) {
-                Log::warning('M-Pesa callback references an unknown transaction.', [
-                    'checkout_request_id' => $checkoutRequestId,
-                ]);
+            return response()->json([
+                'ResultCode' => 1,
+                'ResultDesc' => 'Invalid callback payload.',
+            ], 400);
+        }
 
-                return;
-            }
-
-            if ($transaction->status !== 'pending') {
-                return;
-            }
-
-            if ($transaction->transaction_type !== 'repayment') {
-                Log::warning('M-Pesa repayment callback references a non-repayment transaction.', [
-                    'mpesa_transaction_id' => $transaction->id,
-                ]);
-
-                return;
-            }
-
-            if ((int) $resultCode !== 0) {
-                $transaction->update([
-                    'status' => (int) $resultCode === 1032 ? 'cancelled' : 'failed',
-                ]);
-
-                return;
-            }
-
-            $metadataItems = $callback['CallbackMetadata']['Item'] ?? [];
-            $metadata = collect($metadataItems)->keyBy('Name');
-            $receipt = $metadata->get('MpesaReceiptNumber')['Value'] ?? null;
-            $paidAmount = $metadata->get('Amount')['Value'] ?? null;
-
-            if (
-                ! is_string($receipt)
-                || $receipt === ''
-                || ! is_numeric($paidAmount)
-                || (float) $paidAmount !== (float) $transaction->amount
-            ) {
-                $transaction->update(['status' => 'failed']);
-                Log::error('M-Pesa success callback did not match its pending transaction.', [
-                    'mpesa_transaction_id' => $transaction->id,
-                ]);
-
-                return;
-            }
-
-            $dateValue = $metadata->get('TransactionDate')['Value'] ?? null;
-            $transactionDate = is_numeric($dateValue)
-                && Carbon::hasFormat((string) $dateValue, 'YmdHis')
-                    ? Carbon::createFromFormat('YmdHis', (string) $dateValue)
-                    : now();
-
-            $repaymentService->record(
-                $transaction->loan,
-                $transaction->user_id,
-                (float) $transaction->amount,
-                'mpesa',
-                $receipt
-            );
-
-            $transaction->update([
-                'mpesa_receipt' => $receipt,
-                'status' => 'completed',
-                'transaction_date' => $transactionDate,
+        try {
+            $paymentProcessor->processCallback($callback);
+        } catch (ConnectionException|\RuntimeException $exception) {
+            Log::error('M-Pesa callback could not be verified with STK Query.', [
+                'checkout_request_id' => $checkoutRequestId,
+                'exception' => $exception::class,
             ]);
-        });
+
+            return response()->json([
+                'ResultCode' => 1,
+                'ResultDesc' => 'Callback could not be verified. Please retry.',
+            ], 503);
+        }
 
         return response()->json([
             'ResultCode' => 0,

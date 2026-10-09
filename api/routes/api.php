@@ -25,6 +25,7 @@ Route::middleware('auth:sanctum')->group(function(){
 
     Route::post('/repayments', [RepaymentController::class, 'store']);
     Route::post('/repayments/mpesa', [RepaymentController::class, 'initiateMpesa']);
+    Route::post('/repayments/mpesa/{transaction}/reconcile', [RepaymentController::class, 'reconcileMpesa']);
 
     Route::middleware('admin')->group(function(){
         Route::post('/admin/loans/{loan}/approve', [AdminLoanController::class, 'approve']);
